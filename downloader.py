@@ -1,26 +1,138 @@
-import os, re, asyncio, datetime, random, string, logging
+import os, re, asyncio, datetime, random, string, logging, sys, json
 from tkinter import Tk, filedialog
 try:
-    import requests
+    import http.client
+    import urllib.parse
     from telethon import TelegramClient, events
     from telethon.tl.types import PeerChannel, InputPeerChannel
 except ImportError:
-    os.system('pip install requests')
     os.system('pip install telethon')
     os.system('cls')
     print('Installed dependencies, please run the tool again.')
     input('Press Enter to exit...')
     exit()
 
-
-# logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Debug mode 
+DEBUG_MODE = "--debug" in sys.argv
+if DEBUG_MODE:
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
+    print("DEBUG MODE ENABLED")
+else:
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# telegram api credentials
-# Get from https://my.telegram.org/apps
-API_ID = ENTER YOUR API ID HERE
-API_HASH = 'ENTER YOUR API HASH HERE'
+# running as executable or script
+if getattr(sys, 'frozen', False):
+    # executable
+    application_path = os.path.dirname(sys.executable)
+    if DEBUG_MODE:
+        print(f"Running as executable from: {application_path}")
+else:
+    # script
+    application_path = os.path.dirname(os.path.abspath(__file__))
+    if DEBUG_MODE:
+        print(f"Running as script from: {application_path}")
+
+CONFIG_FILE = os.path.join(application_path, 'config.json')
+
+def get_api_credentials():
+    if DEBUG_MODE:
+        print("\nDEBUG: Starting credential retrieval process")
+    
+    api_id = os.environ.get("TELEGRAM_API_ID")
+    api_hash = os.environ.get("TELEGRAM_API_HASH")
+    
+    if DEBUG_MODE:
+        print(f"DEBUG: Environment variables - API_ID: {'Found' if api_id else 'Not found'}, API_HASH: {'Found' if api_hash else 'Not found'}")
+    
+
+    if api_id and api_hash and api_id.isdigit() and api_hash:
+        logger.info("Using API credentials from environment variables")
+        return api_id, api_hash
+
+    if os.path.exists(CONFIG_FILE):
+        if DEBUG_MODE:
+            print(f"DEBUG: Config file exists at: {CONFIG_FILE}")
+        
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                api_id = config.get('api_id')
+                api_hash = config.get('api_hash')
+                
+                if DEBUG_MODE:
+                    print(f"DEBUG: Config file contents - API_ID: {'Found' if api_id else 'Not found'}, API_HASH: {'Found' if api_hash else 'Not found'}")
+                
+
+                if api_id and api_hash and str(api_id).isdigit() and api_hash and api_hash != "ENTER YOUR API HASH HERE":
+                    logger.info(f"Loaded API credentials from config file: {CONFIG_FILE}")
+                    return str(api_id), api_hash
+                else:
+                    logger.warning("Invalid credentials in config file")
+                    if DEBUG_MODE:
+                        print("DEBUG: Config file validation failed:")
+                        print(f"  - API_ID is numeric: {str(api_id).isdigit() if api_id else 'No API_ID found'}")
+                        print(f"  - API_HASH is not empty: {bool(api_hash) if api_hash else 'No API_HASH found'}")
+                        print(f"  - API_HASH is not default: {api_hash != 'ENTER YOUR API HASH HERE' if api_hash else 'No API_HASH found'}")
+        except Exception as e:
+            logger.error(f"Error reading config file: {e}")
+            if DEBUG_MODE:
+                print(f"DEBUG: Error reading config file: {e}")
+    else:
+        logger.info(f"No config file found at: {CONFIG_FILE}")
+        if DEBUG_MODE:
+            print(f"DEBUG: Config file not found at: {CONFIG_FILE}")
+    
+
+    print("\nTelegram API credentials not found or not properly configured.")
+    print("You need to get your API ID and API Hash from https://my.telegram.org/apps")
+    
+    try:
+        api_id = input("\nEnter your Telegram API ID: ").strip()
+        api_hash = input("Enter your Telegram API Hash: ").strip()
+        
+
+        if not api_id.isdigit() or not api_hash:
+            print("Invalid credentials. API ID must be a number and API Hash cannot be empty.")
+            return None, None
+            
+
+        os.environ["TELEGRAM_API_ID"] = api_id
+        os.environ["TELEGRAM_API_HASH"] = api_hash
+        
+
+        try:
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump({'api_id': api_id, 'api_hash': api_hash}, f)
+            print(f"Credentials saved to config file: {CONFIG_FILE}")
+            if DEBUG_MODE:
+                print(f"DEBUG: Credentials successfully saved to config file")
+        except Exception as e:
+            logger.error(f"Error saving to config file: {e}")
+            if DEBUG_MODE:
+                print(f"DEBUG: Error saving to config file: {e}")
+            print("Credentials saved to environment variables for this session only.")
+        
+    except EOFError:
+        print("\nERROR: Cannot read input. Make sure you're running this from a terminal/command prompt.")
+        return None, None
+    
+    return api_id, api_hash
+
+
+API_ID, API_HASH = get_api_credentials()
+if not API_ID or not API_HASH:
+    print("Cannot proceed without valid API credentials.")
+    print("\nTroubleshooting tips:")
+    print("1. Run with --debug flag for more information")
+    print("2. Check if config.json exists and has correct permissions")
+    print("3. Try deleting config.json and setting credentials again")
+    print("4. Set environment variables TELEGRAM_API_ID and TELEGRAM_API_HASH manually")
+    input("Press Enter to exit...")
+    exit()
+
+if DEBUG_MODE:
+    print(f"DEBUG: Final API credentials - API_ID: {'Valid' if API_ID and API_ID.isdigit() else 'Invalid'}, API_HASH: {'Valid' if API_HASH else 'Invalid'}")
 
 # Discord webhook url (you can leave it blank and it will ask for input)
 DISCORD_WEBHOOK_URL = None
@@ -130,18 +242,53 @@ def send_to_discord_webhook(file_path, file_name):
         if not DISCORD_WEBHOOK_URL:
             logger.error("Discord webhook URL is not set.")
             return False
-            
+        
+        # parse webhook
+        url_parts = urllib.parse.urlparse(DISCORD_WEBHOOK_URL)
+        
+        # host and path
+        host = url_parts.netloc
+        path = url_parts.path
+        
+        boundary = '----WebKitFormBoundary' + ''.join(random.sample(string.ascii_letters + string.digits, 16))
+        
+        # read file
         with open(file_path, 'rb') as f:
             file_content = f.read()
-            
-        files = {'file': (file_name, file_content)}
-        response = requests.post(DISCORD_WEBHOOK_URL, files=files)
         
-        if response.status_code == 200:
+        # prep data
+        payload = []
+        payload.append(f'--{boundary}'.encode())
+        payload.append(f'Content-Disposition: form-data; name="file"; filename="{file_name}"'.encode())
+        payload.append(b'Content-Type: application/octet-stream')
+        payload.append(b'')
+        payload.append(file_content)
+        payload.append(f'--{boundary}--'.encode())
+        
+        # Join with crlf
+        body = b'\r\n'.join(payload)
+        
+        # init connection
+        conn = http.client.HTTPSConnection(host)
+        
+        # headers
+        headers = {
+            'Content-Type': f'multipart/form-data; boundary={boundary}',
+            'Content-Length': str(len(body))
+        }
+        
+        # send req
+        conn.request('POST', path, body=body, headers=headers)
+    
+        response = conn.getresponse()
+        
+        if response.status == 200 or response.status == 204:
             logger.info(f"Successfully sent {file_name} to Discord webhook")
+            conn.close()
             return True
         else:
-            logger.error(f"Failed to send {file_name} to Discord webhook: {response.status_code}")
+            logger.error(f"Failed to send {file_name} to Discord webhook: {response.status}")
+            conn.close()
             return False
     except Exception as e:
         logger.error(f"Error sending file to Discord webhook: {e}")
@@ -152,21 +299,32 @@ async def setup_client():
     global client
     
     # init client
-    client = TelegramClient('telegram_downloader_session', API_ID, API_HASH)
-    await client.start()
+    client = TelegramClient('telegram_downloader_session', int(API_ID), API_HASH)
     
-    if not await client.is_user_authorized():
-        logger.info("You need to log in to your Telegram account.")
-        logger.info("Please check your Telegram app for the login code and enter it below.")
-        try:
-            await client.send_code_request(input("Enter your phone number (with country code): "))
-            await client.sign_in(code=input("Enter the code you received: "))
-        except Exception as e:
-            logger.error(f"Login failed: {e}")
-            return False
-    
-    logger.info("Successfully logged in to Telegram!")
-    return True
+    try:
+        await client.start()
+        
+        if not await client.is_user_authorized():
+            logger.info("You need to log in to your Telegram account.")
+            logger.info("Please check your Telegram app for the login code and enter it below.")
+            try:
+                phone = input("Enter your phone number (with country code): ")
+                await client.send_code_request(phone)
+                code = input("Enter the code you received: ")
+                await client.sign_in(code=code)
+            except EOFError:
+                logger.error("ERROR: Cannot read input. Make sure you're running this from a terminal/command prompt.")
+                logger.error("If using the executable, do not double-click it - open a command prompt and run it from there.")
+                return False
+            except Exception as e:
+                logger.error(f"Login failed: {e}")
+                return False
+        
+        logger.info("Successfully logged in to Telegram!")
+        return True
+    except Exception as e:
+        logger.error(f"Error setting up client: {e}")
+        return False
 
 async def main():
     """Main function to run the downloader."""
@@ -252,4 +410,29 @@ async def main():
         await client.disconnect()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        if DEBUG_MODE:
+            print("DEBUG: Starting main function")
+        asyncio.run(main())
+        input("\nPress Enter to exit...")
+    except RuntimeError as e:
+        if "lost sys.stdin" in str(e):
+            print("\nERROR: This application requires console input.")
+            print("Please run it from a command prompt/terminal, not by double-clicking.")
+            print("\nTo use this application:")
+            print("1. Open Command Prompt or PowerShell")
+            print("2. cd to the folder containing this executable")
+            print("3. Run the application")
+            input("\nPress Enter to exit...")
+        else:
+            print(f"An error occurred: {e}")
+            if DEBUG_MODE:
+                import traceback
+                traceback.print_exc()
+            input("\nPress Enter to exit...")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        if DEBUG_MODE:
+            import traceback
+            traceback.print_exc()
+        input("\nPress Enter to exit...")

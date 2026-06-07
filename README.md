@@ -1,7 +1,5 @@
 # Telegram File Downloader
 
-A Python program to download files from Telegram channels, it can save files locally or send them to a Discord webhook.
-
 ## Features
 
 - Download files from any Telegram channel you have access to
@@ -19,7 +17,7 @@ A Python program to download files from Telegram channels, it can save files loc
 
 ## Setup
 
-1. Get your Telegram API credentials from [my.telegram.org/apps](https://my.telegram.org/apps)
+1. Get your Telegram credentials from [my.telegram.org/apps](https://my.telegram.org/apps)
 2. Update the `API_ID` and `API_HASH` in the file with your credentials
 
 
@@ -44,8 +42,3 @@ The tool accepts various channel formats:
 - Username (e.g., 'channelname')
 - t.me links (e.g., 't.me/channelname')
 - web.telegram.org links (a bit broken i think)
-
-## Notes
-
-- When trying to download from private channels, you need to be a member of the channel
-- On first run, you'll need to log in to your Telegram account
